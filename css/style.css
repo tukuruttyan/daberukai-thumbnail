@@ -51,13 +51,33 @@ body {
 
 .stage { position: sticky; top: 16px; }
 @media (max-width: 960px) { .stage { position: static; } }
+/* 縦長でも画面に収まるように、高さの上限から幅を決める（--ar は app.js が入れる） */
 .frame {
+  width: min(100%, max(240px, calc((100vh - 230px) * var(--ar, 1.7778))));
+  margin: 0 auto;
   border-radius: var(--radius);
   overflow: hidden;
   box-shadow: 0 1px 0 var(--line), 0 12px 40px rgba(20, 30, 50, .15);
   line-height: 0;
 }
 #preview { width: 100%; height: auto; display: block; }
+
+.ratios {
+  display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
+  border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-bottom: 14px;
+}
+.ratios button { border: 0; border-radius: 0; background: var(--card); padding: 6px 4px; display: grid; gap: 1px; line-height: 1.3; }
+.ratios button + button { border-left: 1px solid var(--line); }
+.ratios b { font-weight: 500; font-size: 12px; }
+.ratios span { font-size: 10px; color: var(--sub); }
+.ratios button[aria-pressed="true"] { background: var(--accent); color: var(--bg); }
+.ratios button[aria-pressed="true"] span { color: inherit; opacity: .75; }
+@media (max-width: 520px) {
+  .ratios { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ratios button:nth-child(4) { border-left: 0; }
+  .ratios button:nth-child(n+4) { border-top: 1px solid var(--line); }
+}
+.ratio-hint { margin-top: 8px; }
 
 .export { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; align-items: center; }
 .status { color: var(--sub); font-size: 12px; min-height: 1.5em; margin: 8px 0 0; }

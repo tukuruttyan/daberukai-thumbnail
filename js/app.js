@@ -6,6 +6,21 @@
   const DAYS = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"];
   const MIME = { png: "image/png", jpeg: "image/jpeg", webp: "image/webp" };
   const EXT = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };
+  // 比率ごとの書き出しサイズ（先頭が既定）。レイアウトは render.js の LAYOUTS
+  const RATIOS = [
+    { id: "16x9", name: "16:9", ratio: "YouTube", hint: "YouTube・配信・スライドなどの標準。", sizes: [[1920, 1080], [1280, 720], [3840, 2160]] },
+    { id: "discord", name: "Discord", ratio: "2.5:1", hint: "Discord イベントのカバー画像。表示は 2.5:1 なので、この比率なら上下が切れません。", sizes: [[1600, 640], [2400, 960], [800, 320]] },
+    { id: "ogp", name: "OGP", ratio: "1.91:1", hint: "リンクカード（OGP）や Facebook 投稿の比率。", sizes: [[1200, 630], [2400, 1260]] },
+    { id: "1x1", name: "正方形", ratio: "1:1", hint: "X・Instagram の投稿など。", sizes: [[1080, 1080], [2160, 2160]] },
+    { id: "4x5", name: "縦長", ratio: "4:5", hint: "Instagram のフィード投稿（縦）など。", sizes: [[1080, 1350], [2160, 2700]] },
+    { id: "9x16", name: "ストーリー", ratio: "9:16", hint: "Instagram・X のストーリーやショート動画など。", sizes: [[1080, 1920], [2160, 3840]] },
+  ];
+  const ratioOf = (id) => RATIOS.find((r) => r.id === id) || RATIOS[0];
+  // 選んでいる比率のサイズ。保存されている幅がその比率に無ければ既定サイズ
+  const sizeOf = () => {
+    const r = ratioOf(state.ratio);
+    return r.sizes.find(([w]) => w === state.size) || r.sizes[0];
+  };
 
   const newSpeaker = (o = {}) => ({ name: "", label: "", src: null, zoom: 1, ox: 0, oy: 0, ...o });
   const defaults = () => ({
@@ -18,6 +33,7 @@
     fx: true,
     showLogo: true,
     format: "jpeg",
+    ratio: "16x9",
     size: 1920,
     speakers: [
       newSpeaker({ name: "そーま", label: "SO-MA", src: A.samples.soma }),
@@ -121,14 +137,30 @@
       queued = false;
       const d = view();
       await R.ensureFonts(d);
-      R.draw(canvas, d, { logoIcon });
+      resizePreview();
+      R.draw(canvas, d, { logoIcon }, state.ratio);
     });
+  }
+  // プレビューは長辺 1920px で描く
+  function resizePreview() {
+    const L = R.LAYOUTS[state.ratio] || R.LAYOUTS["16x9"];
+    const k = 1920 / Math.max(L.W, L.H);
+    const w = Math.round(L.W * k), h = Math.round(L.H * k);
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+    canvas.parentElement.style.setProperty("--ar", String(L.W / L.H));
   }
   if (document.fonts) document.fonts.addEventListener("loadingdone", schedule);
 
   // ---------- text fields ----------
   const fields = document.querySelectorAll("[data-key]");
+  const sizeSelect = document.querySelector('[data-key="size"]');
   function syncFields() {
+    const r = ratioOf(state.ratio);
+    sizeSelect.innerHTML = "";
+    r.sizes.forEach(([w, h]) => sizeSelect.add(new Option(`${w} × ${h}`, String(w))));
+    state.size = sizeOf()[0];
+    document.querySelectorAll("[data-ratio]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.ratio === r.id)));
+    document.getElementById("ratio-hint").textContent = r.hint;
     fields.forEach((el) => {
       const k = el.dataset.key;
       if (el.type === "checkbox") el.checked = !!state[k];
@@ -219,20 +251,38 @@
   document.querySelectorAll("[data-format]").forEach((b) =>
     b.addEventListener("click", () => { state.format = b.dataset.format; syncFields(); save(); })
   );
+  const ratioBar = document.getElementById("ratios");
+  RATIOS.forEach((r) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.dataset.ratio = r.id;
+    b.title = r.hint;
+    b.innerHTML = `<b></b><span class="mono"></span>`;
+    b.querySelector("b").textContent = r.name;
+    b.querySelector("span").textContent = r.ratio;
+    b.addEventListener("click", () => {
+      if (state.ratio === r.id) return;
+      state.ratio = r.id;
+      state.size = r.sizes[0][0];
+      syncFields(); save(); schedule();
+    });
+    ratioBar.appendChild(b);
+  });
   const status = document.getElementById("status");
   document.getElementById("download").addEventListener("click", async () => {
     const d = view();
     await R.ensureFonts(d);
-    const W = +state.size || 1920;
+    const [W, H] = sizeOf();
     const c = document.createElement("canvas");
     c.width = W;
-    c.height = Math.round((W * 9) / 16);
-    R.draw(c, d, { logoIcon });
+    c.height = H;
+    R.draw(c, d, { logoIcon }, state.ratio);
     const want = MIME[state.format];
     const blob = await new Promise((res) => c.toBlob(res, want, 0.92));
     if (!blob) { toast("書き出しに失敗しました"); return; }
     const ext = EXT[blob.type] || "png";
-    const name = `thumbnail_${state.date || "untitled"}.${ext}`;
+    const suffix = state.ratio === "16x9" ? "" : `_${state.ratio}`;
+    const name = `thumbnail_${state.date || "untitled"}${suffix}.${ext}`;
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = name;

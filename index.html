@@ -17,6 +17,7 @@
 
   <main class="layout">
     <section class="stage">
+      <div id="ratios" class="ratios" role="group" aria-label="比率"></div>
       <div class="frame"><canvas id="preview" width="1920" height="1080" aria-label="サムネイルのプレビュー"></canvas></div>
       <div class="export">
         <div class="seg" role="group" aria-label="形式">
@@ -24,13 +25,10 @@
           <button type="button" data-format="jpeg">JPEG</button>
           <button type="button" data-format="webp">WebP</button>
         </div>
-        <select data-key="size" aria-label="サイズ">
-          <option value="1920">1920 × 1080</option>
-          <option value="1280">1280 × 720</option>
-          <option value="3840">3840 × 2160</option>
-        </select>
+        <select data-key="size" aria-label="サイズ"></select>
         <button id="download" class="primary" type="button">ダウンロード</button>
       </div>
+      <p id="ratio-hint" class="hint ratio-hint"></p>
       <p id="status" class="status mono"></p>
     </section>
 
