@@ -11,6 +11,8 @@
     "16x9": { W: 1280, H: 720, header: "side", grid: false, wrap: 1 },
     discord: { W: 1800, H: 720, header: "side", grid: false, wrap: 1 },
     ogp: { W: (720 * 1200) / 630, H: 720, header: "side", grid: false, wrap: 1 },
+    // 16:9 より幅が狭く 4 人だと横一列に収まらないので、登壇者は grid で並べる
+    "2940": { W: (720 * 2940) / 1912, H: 720, header: "side", grid: true, wrap: 2 },
     "1x1": { W: 960, H: 960, header: "auto", grid: true, wrap: 2 },
     "4x5": { W: 880, H: 1100, header: "stack", grid: true, wrap: 2 },
     "9x16": { W: 810, H: 1440, header: "stack", grid: true, wrap: 3 },
