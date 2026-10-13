@@ -24,6 +24,9 @@
 
   const newSpeaker = (o = {}) => ({ name: "", label: "", src: null, zoom: 1, ox: 0, oy: 0, ...o });
   const defaults = () => ({
+    vol: "",
+    volStyle: "hash",
+    volPos: "sub",
     title: "UnityのR3とか",
     sub: "だべる会",
     date: "2026-10-12",
@@ -113,8 +116,29 @@
   }
   function autoDay() { const d = parseDate(state.date); return d ? DAYS[d.getDay()] : ""; }
   function autoBy() { return state.speakers.map((s) => s.name.trim()).filter(Boolean).join(", "); }
+  // 回数。数字なら表記に合わせて整え、それ以外（「特別回」など）は書いたまま出す
+  const VOL_STYLES = {
+    vol: { key: "VOL", fmt: (n) => `VOL.${n}` },
+    no: { key: "NO.", fmt: (n) => `No.${n}` },
+    ep: { key: "EP", fmt: (n) => `EP.${n}` },
+    hash: { key: "#", fmt: (n) => `#${n}` },
+    jp: { key: "VOL", fmt: (n) => `第${+n}回`, jp: true },
+  };
+  function volView() {
+    const raw = (state.vol || "").trim().replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
+    if (!raw) return {};
+    const st = VOL_STYLES[state.volStyle] || VOL_STYLES.vol;
+    const num = /^\d+$/.test(raw);
+    const n = num ? String(+raw).padStart(2, "0") : raw;
+    const jp = num ? !!st.jp : /[^\x00-\x7f]/.test(raw);
+    const text = num ? st.fmt(n) : raw;
+    // DATE の表では見出しが表記を兼ねるので、値は数字だけ（第N回はそのまま）
+    const value = num && !st.jp ? n : text;
+    return { vol: { text, jp, pos: state.volPos, key: st.key, value } };
+  }
   function view() {
     return {
+      ...volView(),
       title: state.title,
       sub: state.sub,
       dateText: (state.date || "").replace(/-/g, "/"),

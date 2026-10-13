@@ -91,6 +91,8 @@ legend { padding: 0 6px; font-size: 11px; color: var(--sub); letter-spacing: .12
 .count { margin-left: 6px; }
 label { display: grid; gap: 4px; font-size: 12px; color: var(--sub); }
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.row.vol { grid-template-columns: 1fr auto auto; }
+.row.vol select { width: 100%; }
 .hint { margin: 0; font-size: 11px; color: var(--sub); }
 
 input[type=text], input[type=date], select {

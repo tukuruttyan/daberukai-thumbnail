@@ -35,6 +35,24 @@
     <section class="panel">
       <fieldset>
         <legend class="mono">TEXT</legend>
+        <div class="row vol">
+          <label>回数<input data-key="vol" type="text" inputmode="numeric" placeholder="なし"></label>
+          <label>表記<select data-key="volStyle">
+            <option value="hash">#03</option>
+            <option value="vol">VOL.03</option>
+            <option value="no">No.03</option>
+            <option value="ep">EP.03</option>
+            <option value="jp">第3回</option>
+          </select></label>
+          <label>場所<select data-key="volPos">
+            <option value="sub">サブタイトルの後ろ</option>
+            <option value="title">タイトルの上</option>
+            <option value="inline">タイトルの前</option>
+            <option value="info">DATE の表</option>
+            <option value="corner">左下</option>
+            <option value="big">背景に大きく</option>
+          </select></label>
+        </div>
         <label>タイトル<input data-key="title" type="text"></label>
         <label>サブタイトル<input data-key="sub" type="text"></label>
         <div class="row">
@@ -43,6 +61,7 @@
         </div>
         <label>時間<input data-key="time" type="text"></label>
         <label>BY<input id="by" data-key="by" type="text" placeholder="名前から自動"></label>
+        <p class="hint">回数は数字なら表記に合わせて整えます（「特別回」のような文字はそのまま）。空欄なら出しません。</p>
         <p class="hint">曜日と BY は空欄なら日付・登壇者の名前から自動で入ります。</p>
       </fieldset>
 

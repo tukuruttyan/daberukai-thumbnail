@@ -178,21 +178,61 @@
   }
 
   // タイトルとサブタイトル。下端の y を返す
-  function titleBlock(ctx, S, d, maxW, wrap) {
-    const { fs, lines } = fitTitle(ctx, d.title, maxW, wrap);
-    const lh = fs * 1.1;
-    ctx.font = titleFont(fs);
-    const base = 50 + 0.961 * fs;
-    fxText(ctx, S, d.fx, (dx) => lines.forEach((l, i) => ctx.fillText(l, 58 + dx, base + i * lh)), { color: "rgba(255,255,255,.25)", blur: 18 });
-    let bottom = 50 + 1.05 * fs + (lines.length - 1) * lh;
+  // 回数（d.vol.pos で置き場所が変わる）
+  const volFont = (jp, px) => (jp ? `500 ${px * 1.1}px ${FONT_JP}` : `500 ${px}px ${FONT_MONO}`);
+  const volSpacing = (jp, px) => px * (jp ? 0.08 : 0.12);
+  const volAt = (d, pos) => (d.vol && d.vol.pos === pos ? d.vol : null);
+  const GLOW = { color: "rgba(255,255,255,.25)", blur: 18 };
+  function volText(ctx, S, d, v, px, x, y, alpha) {
+    ctx.font = volFont(v.jp, px);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    fxText(ctx, S, d.fx, (dx) => fillSpaced(ctx, v.text, x + dx, y, volSpacing(v.jp, px)), GLOW);
+    ctx.restore();
+  }
+  function volWidth(ctx, v, px) {
+    ctx.font = volFont(v.jp, px);
+    return spacedWidth(ctx, v.text, volSpacing(v.jp, px));
+  }
 
+  function titleBlock(ctx, S, d, maxW, wrap) {
+    let top = 50;
+    const kicker = volAt(d, "title");
+    if (kicker) {
+      volText(ctx, S, d, kicker, 20, 60, top + 20, 0.85);
+      top += 34;
+    }
+    // タイトルの前に置くときは、タイトルの半分の大きさで横に並べる
+    const inline = volAt(d, "inline");
+    const inlineW = (fs) => (inline ? volWidth(ctx, inline, fs * 0.5) + fs * 0.2 : 0);
+    const { fs, lines } = fitTitle(ctx, d.title, maxW - inlineW(92), wrap);
+    const lh = fs * 1.1;
+    const base = top + 0.961 * fs;
+    let x = 58;
+    if (inline) {
+      volText(ctx, S, d, inline, fs * 0.5, 60, base, 0.8);
+      x += inlineW(fs);
+    }
+    ctx.font = titleFont(fs);
+    fxText(ctx, S, d.fx, (dx) => lines.forEach((l, i) => ctx.fillText(l, x + dx, base + i * lh)), GLOW);
+    let bottom = top + 1.05 * fs + (lines.length - 1) * lh;
+
+    const after = volAt(d, "sub");
+    if (after && !d.sub) {
+      volText(ctx, S, d, after, 24, 60, bottom + 14 + 32.5, 0.85);
+      bottom += 14 + 40;
+    }
     if (d.sub) {
       const top = bottom + 14;
       ctx.font = `400 28px ${FONT_JP}`;
       fxText(ctx, S, d.fx, (dx) => {
         ctx.fillRect(58 + dx, top + 20.25 - 0.75, 36, 1.5);
         fillSpaced(ctx, d.sub, 108 + dx, top + 32.5, 28 * 0.12);
-      }, { color: "rgba(255,255,255,.25)", blur: 18 });
+      }, GLOW);
+      if (after) {
+        const subW = spacedWidth(ctx, d.sub, 28 * 0.12);
+        volText(ctx, S, d, after, 24, 108 + subW + 14, top + 32.5, 0.85);
+      }
       bottom = top + 40;
     }
     return bottom;
@@ -201,7 +241,8 @@
   // DATE / DAY / TIME / BY。pos.right を渡すと右寄せ（右上用）、pos.left を渡すと左寄せの表にする。
   // 左端の x と下端の y を返す（タイトルの最大幅や登壇者の位置を決めるため）
   function infoBlock(ctx, S, d, pos, measureOnly) {
-    const rows = [["DATE", d.dateText, false], ["DAY", d.day, false], ["TIME", d.time, false], ["BY", d.by, true]]
+    const info = volAt(d, "info");
+    const rows = [info ? [info.key, info.value, info.jp] : [], ["DATE", d.dateText, false], ["DAY", d.day, false], ["TIME", d.time, false], ["BY", d.by, true]]
       .filter((r) => r[1]);
     ctx.font = `400 13px ${FONT_MONO}`;
     const keyCol = Math.max(0, ...rows.map((r) => spacedWidth(ctx, r[0], 13 * 0.06)));
@@ -325,9 +366,11 @@
   async function ensureFonts(d) {
     if (!document.fonts || !document.fonts.load) return;
     const sp = d.speakers.map((s) => `[ ${s.label} ]`).join("");
-    const mono = ["DATE", "DAY", "TIME", "BY", d.dateText, d.day, d.time, sp].join("");
+    const vol = d.vol ? d.vol.text + d.vol.key + d.vol.value : "";
+    const mono = ["DATE", "DAY", "TIME", "BY", d.dateText, d.day, d.time, sp, vol].join("");
     const loads = [
-      document.fonts.load(`500 92px "Noto Sans JP"`, d.title + d.by),
+      document.fonts.load(`500 92px "Noto Sans JP"`, d.title + d.by + vol),
+      document.fonts.load(`500 20px "JetBrains Mono"`, vol || "0"),
       document.fonts.load(`400 28px "Noto Sans JP"`, d.sub || "あ"),
       document.fonts.load(`400 21px "JetBrains Mono"`, mono),
       document.fonts.load(`800 30px "M PLUS Rounded 1c"`, "#るっちゃん"),
@@ -377,6 +420,18 @@
     ctx.setTransform(S, 0, 0, S, 0, 0);
     fog(ctx, BW, BH);
     cornerTicks(ctx, BW, BH);
+    const big = volAt(d, "big");
+    if (big) {
+      // 背景の透かし。右下に大きく、登壇者やタイトルより奥に置く
+      const px = Math.min(BW, BH) * 0.42;
+      ctx.font = volFont(big.jp, px);
+      const w = spacedWidth(ctx, big.text, 0);
+      ctx.save();
+      ctx.globalAlpha = 0.16;
+      ctx.fillStyle = "#fff";
+      ctx.fillText(big.text, BW - 40 - w, BH - 40);
+      ctx.restore();
+    }
 
     const side = { right: BW - 58, top: 81.9 };
     const infoLeft = infoBlock(ctx, S, d, side, true).left;
@@ -397,7 +452,7 @@
     let places;
     if (L.grid) {
       const top = headerBottom + 40;
-      const bottom = BH - (d.showLogo ? LOGO_FROM_BOTTOM + 27 + 16 : 44);
+      const bottom = BH - (d.showLogo || volAt(d, "corner") ? LOGO_FROM_BOTTOM + 27 + 16 : 44);
       places = gridPlacement(n, { x: 58, y: top, w: BW - 116, h: bottom - top });
     } else {
       const D = ICON_D[n], step = D + SPEAKER_PAD;
@@ -406,6 +461,9 @@
     sps.forEach((sp, i) => speakerBlock(ctx, S, d, sp, places[i].cx, places[i].cy, places[i].D));
 
     if (d.showLogo) logo(ctx, S, d, assets.logoIcon, BW, BH);
+    // 左下。ロゴと同じ高さにそろえる
+    const corner = volAt(d, "corner");
+    if (corner) volText(ctx, S, d, corner, 44, 60, BH - LOGO_FROM_BOTTOM + 16, 0.9);
   }
 
   window.ThumbRenderer = { draw, ensureFonts, LAYOUTS };
