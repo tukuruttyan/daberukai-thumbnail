@@ -113,7 +113,7 @@
   }
 
   // 白文字 + 色ズレ + ぼんやりした光
-  function fxText(ctx, S, fx, draw, glow) {
+  function fxText(ctx, S, fx, draw, glow, color = "#fff") {
     if (glow) {
       ctx.save();
       ctx.shadowColor = glow.color;
@@ -127,9 +127,14 @@
       ctx.fillStyle = CYAN; draw(1.5);
       ctx.fillStyle = RED; draw(-1.5);
     }
-    ctx.fillStyle = "#fff";
+    ctx.fillStyle = color;
     draw(0);
   }
+
+  // ミュート中の見た目（話者アイコンを光らせる動画で、ミュートした区間に使う）。
+  // 輪・十字・ふち・名前を灰色にして薄くし、写真は色を抜いてまわりの色に透かす
+  const MUTED = { rgb: "119,123,131", line: 0.6, photoGray: 0.85, photoAlpha: 0.75 };
+  const lineColor = (d, a) => (d.muted ? `rgba(${MUTED.rgb},${a * MUTED.line})` : `rgba(255,255,255,${a})`);
 
   function line(ctx, x1, y1, x2, y2, color, width) {
     ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
@@ -311,18 +316,36 @@
     return { left: minLeft, bottom: pos.top + (rows.length - 1) * 36.75 + 6 };
   }
 
+  // (cx, cy) から半径 r0〜r1 の輪の中の、いま描かれている色の平均（canvas の座標に直して読む）
+  function bandColor(ctx, cx, cy, r0, r1) {
+    const t = ctx.getTransform(), k = t.a;
+    const px = t.e + cx * k, py = t.f + cy * k, R = Math.ceil(r1 * k) + 1;
+    const x0 = Math.max(0, Math.floor(px - R)), y0 = Math.max(0, Math.floor(py - R));
+    const w = Math.min(ctx.canvas.width - x0, 2 * R + 1), h = Math.min(ctx.canvas.height - y0, 2 * R + 1);
+    const data = ctx.getImageData(x0, y0, w, h).data;
+    const sum = [0, 0, 0];
+    let n = 0;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const dd = Math.hypot(x0 + x + 0.5 - px, y0 + y + 0.5 - py) / k;
+      if (dd < r0 || dd > r1) continue;
+      const i = (y * w + x) * 4;
+      sum[0] += data[i]; sum[1] += data[i + 1]; sum[2] += data[i + 2]; n++;
+    }
+    return n ? `rgb(${sum.map((v) => Math.round(v / n)).join(",")})` : "#fff";
+  }
+
   function speakerBlock(ctx, S, d, sp, cx, cy, D) {
     const r = D / 2;
     // rings
     circle(ctx, cx, cy, r + 26 - 0.5);
-    ctx.strokeStyle = "rgba(255,255,255,.55)"; ctx.lineWidth = 1; ctx.stroke();
+    ctx.strokeStyle = lineColor(d, 0.55); ctx.lineWidth = 1; ctx.stroke();
     ctx.save();
     ctx.setLineDash([3, 3]);
     circle(ctx, cx, cy, r + 14 - 0.5);
-    ctx.strokeStyle = "rgba(255,255,255,.35)"; ctx.stroke();
+    ctx.strokeStyle = lineColor(d, 0.35); ctx.stroke();
     ctx.restore();
     // crosshair ticks
-    const tc = "rgba(255,255,255,.8)";
+    const tc = lineColor(d, 0.8);
     line(ctx, cx - r - 46, cy, cx - r - 30, cy, tc, 1);
     line(ctx, cx + r + 30, cy, cx + r + 46, cy, tc, 1);
     line(ctx, cx, cy - r - 46, cx, cy - r - 30, tc, 1);
@@ -336,11 +359,13 @@
     circle(ctx, cx, cy, r); ctx.fillStyle = "#fff"; ctx.fill();
     ctx.restore();
     // chromatic edges + white rim
-    if (d.fx) {
+    if (d.fx && !d.muted) {
       circle(ctx, cx + 3, cy, r); ctx.fillStyle = "rgba(70,210,255,.45)"; ctx.fill();
       circle(ctx, cx - 3, cy, r); ctx.fillStyle = "rgba(255,70,110,.35)"; ctx.fill();
     }
-    circle(ctx, cx, cy, r + 1.5); ctx.fillStyle = "rgba(255,255,255,.9)"; ctx.fill();
+    // ミュート中は、写真を透かした下に見せる色として、ふちのすぐ外（影の上）の色の平均を取っておく
+    const under = d.muted ? bandColor(ctx, cx, cy, r + 6, r + 12) : "#fff";
+    circle(ctx, cx, cy, r + 1.5); ctx.fillStyle = lineColor(d, 0.9); ctx.fill();
 
     // image (cover, then user zoom/offset)
     ctx.save();
@@ -351,7 +376,17 @@
       const z = sp.zoom || 1;
       const sc = Math.max(D / img.naturalWidth, D / img.naturalHeight) * z;
       const w = img.naturalWidth * sc, h = img.naturalHeight * sc;
+      ctx.save();
+      if (d.muted) ctx.filter = `grayscale(${MUTED.photoGray})`;
       ctx.drawImage(img, cx - w / 2 + (sp.ox || 0) * D, cy - h / 2 + (sp.oy || 0) * D, w, h);
+      ctx.restore();
+    }
+    // ミュート中は写真（白地ごと）を photoAlpha の濃さにする = まわりの色を 1 - photoAlpha だけ重ねる
+    if (d.muted) {
+      ctx.save();
+      ctx.globalAlpha = 1 - MUTED.photoAlpha;
+      ctx.fillStyle = under; ctx.fillRect(cx - r, cy - r, D, D);
+      ctx.restore();
     }
     // glassy sheen: linear-gradient(140deg, ...) with screen blend
     const len = D * (Math.sin((40 * Math.PI) / 180) + Math.cos((40 * Math.PI) / 180));
@@ -373,8 +408,9 @@
       const spc = 13 * 0.06;
       const w = spacedWidth(ctx, text, spc);
       ctx.save();
-      ctx.globalAlpha = 0.8;
-      fxText(ctx, S, d.fx, (o) => fillSpaced(ctx, text, cx - w / 2 + o, cy + r + 58, spc), { color: "rgba(255,255,255,.25)", blur: 18 });
+      ctx.globalAlpha = d.muted ? 0.8 * MUTED.line : 0.8;
+      fxText(ctx, S, d.fx && !d.muted, (o) => fillSpaced(ctx, text, cx - w / 2 + o, cy + r + 58, spc), { color: "rgba(255,255,255,.25)", blur: 18 },
+        d.muted ? `rgb(${MUTED.rgb})` : "#fff");
       ctx.restore();
     }
   }

@@ -36,6 +36,7 @@
     by: "",
     fx: true,
     showLogo: true,
+    muted: false,
     format: "jpeg",
     ratio: "16x9",
     size: 1920,
@@ -148,6 +149,7 @@
       by: state.by.trim() || autoBy(),
       fx: state.fx,
       showLogo: state.showLogo,
+      muted: !!state.muted,
       speakers: state.speakers.map((s) => ({ label: s.label.trim(), zoom: s.zoom, ox: s.ox, oy: s.oy, img: imgFor(s.src) })),
     };
   }
@@ -306,7 +308,7 @@
     const blob = await new Promise((res) => c.toBlob(res, want, 0.92));
     if (!blob) { toast("書き出しに失敗しました"); return; }
     const ext = EXT[blob.type] || "png";
-    const suffix = state.ratio === "16x9" ? "" : `_${state.ratio}`;
+    const suffix = (state.ratio === "16x9" ? "" : `_${state.ratio}`) + (state.muted ? "_muted" : "");
     const name = `thumbnail_${state.date || "untitled"}${suffix}.${ext}`;
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
