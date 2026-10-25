@@ -56,8 +56,14 @@ Safari は WebP の書き出しに対応していないため、WebP を選ん�
 
 ## フォント
 
-Google Fonts から読み込んでいます（Noto Sans JP / JetBrains Mono / M PLUS Rounded 1c）。
+サムネの日本語は Kosugi Maru、英数字は Agave、右下のロゴは M PLUS Rounded 1c です。
+Kosugi Maru と M PLUS Rounded 1c は Google Fonts から読み込みます（画面の文字は Noto Sans JP / JetBrains Mono）。
 オフラインだと OS のフォントで代用されるので、書き出しはネットにつながった状態で行ってください。
+
+Agave は Google Fonts に無いので同梱しています（`assets/fonts/Agave-Regular.ttf`、SIL Open Font License 1.1、
+`assets/fonts/Agave-LICENSE.txt`）。`js/assets.js` に埋め込み、英数字の範囲だけを受け持つフォントとして登録します。
+英数字は日本語より少し大きく（1.07 倍）、太く（タイトルは 480、ほかは 460 相当。Regular のふちをなぞって太らせる）描き、
+日本語との境目に少し間をあけます。値は `js/render.js` の `TEXT_TITLE` / `TEXT_SMALL` にあります。
 
 ## ファイル構成
 
@@ -66,8 +72,8 @@ index.html            画面
 css/style.css         画面のスタイル
 js/render.js          サムネイルの描画（canvas）。デザインを変えるならここ
 js/app.js             入力・保存・書き出し
-js/assets.js          ロゴとサンプル画像を埋め込んだもの（自動生成）
-assets/               ロゴとサンプル画像の元ファイル
+js/assets.js          ロゴ・サンプル画像・Agave を埋め込んだもの（自動生成）
+assets/               ロゴ・サンプル画像・フォント（Agave）の元ファイル
 tools/embed-assets.mjs  assets/ から js/assets.js を作り直すスクリプト
 ```
 

@@ -17,8 +17,10 @@
     "4x5": { W: 880, H: 1100, header: "stack", grid: true, wrap: 2 },
     "9x16": { W: 810, H: 1440, header: "stack", grid: true, wrap: 3 },
   };
-  const FONT_JP = '"Noto Sans JP", "Hiragino Sans", "Yu Gothic", sans-serif';
-  const FONT_MONO = '"JetBrains Mono", ui-monospace, Menlo, monospace';
+  // 日本語は Kosugi Maru、英数字は Agave（js/assets.js に埋め込み、英数字の範囲だけ受け持つ）
+  const FONT_KANA = '"Kosugi Maru", "Hiragino Maru Gothic ProN", sans-serif';
+  const FONT_JP = `"Agave", ${FONT_KANA}`;
+  const FONT_MONO = FONT_JP;
   const FONT_LOGO = '"M PLUS Rounded 1c", "Hiragino Maru Gothic ProN", sans-serif';
   const RED = "rgba(255,70,110,.45)", CYAN = "rgba(70,210,255,.5)";
 
@@ -69,15 +71,45 @@
   }
 
   // ---- text helpers ----
-  function spacedWidth(ctx, text, spacing) {
-    let w = 0;
-    for (const ch of text) w += ctx.measureText(ch).width + spacing;
-    return w; // CSS と同じく末尾にも字間が付く
+  // 英数字（Agave）は日本語（Kosugi Maru）より小さく細く見えるので、少し大きく・太く描き、日本語との境目に少し間をあける。
+  // 太さは Regular のふちを同じ色でなぞって出す（Agave の縦線は Regular 170 / Bold 256、2048 = 1em。400→700 で 86/2048em 太る）
+  const LATIN_RANGE = "U+0020-007E, U+00A0-00FF";
+  const isLatin = (ch) => /[ -~ -ÿ]/.test(ch);
+  const TEXT_TITLE = { weight: 480, scale: 1.07, gap: 0.06 };
+  const TEXT_SMALL = { weight: 460, scale: 1.07, gap: 0.06 };
+  const pxOf = (ctx) => parseFloat(/([\d.]+)px/.exec(ctx.font)[1]);
+  function layoutText(ctx, text, px, spacing, st) {
+    const keep = ctx.font, items = [];
+    let x = 0, prev = null;
+    for (const ch of text) {
+      const latin = isLatin(ch);
+      if (prev !== null && prev !== latin) x += st.gap * px;
+      const fs = latin ? px * st.scale : px;
+      ctx.font = `400 ${fs}px ${latin ? FONT_JP : FONT_KANA}`;
+      items.push({ ch, x, font: ctx.font, stroke: latin ? ((st.weight - 400) / 300) * (86 / 2048) * fs : 0 });
+      x += ctx.measureText(ch).width + spacing;
+      prev = latin;
+    }
+    ctx.font = keep;
+    return { items, width: x };
   }
-  function fillSpaced(ctx, text, x, y, spacing) {
-    if (!spacing) { ctx.fillText(text, x, y); return; }
-    let cx = x;
-    for (const ch of text) { ctx.fillText(ch, cx, y); cx += ctx.measureText(ch).width + spacing; }
+  // ctx.font の大きさで、字間 spacing を付けて測る・描く（CSS と同じく末尾にも字間が付く）
+  function spacedWidth(ctx, text, spacing, st = TEXT_SMALL) {
+    return layoutText(ctx, text, pxOf(ctx), spacing, st).width;
+  }
+  function fillSpaced(ctx, text, x, y, spacing, st = TEXT_SMALL) {
+    const keep = ctx.font;
+    for (const it of layoutText(ctx, text, pxOf(ctx), spacing, st).items) {
+      ctx.font = it.font;
+      ctx.fillText(it.ch, x + it.x, y);
+      if (it.stroke > 0) {
+        ctx.save();
+        ctx.lineWidth = it.stroke; ctx.lineJoin = "round"; ctx.strokeStyle = ctx.fillStyle;
+        ctx.strokeText(it.ch, x + it.x, y);
+        ctx.restore();
+      }
+    }
+    ctx.font = keep;
   }
 
   // 白文字 + 色ズレ + ぼんやりした光
@@ -136,12 +168,13 @@
     ctx.fillRect(-rx, -rx, rx * 2, rx * 2);
     ctx.restore();
   }
+  // 四隅のカギ。角と端を少し丸める
   function cornerTicks(ctx, W, H) {
-    const c = "rgba(255,255,255,.85)", w = 1.5, o = 28.75, L = 18;
+    const c = "rgba(255,255,255,.85)", w = 1.5, o = 28.75, L = 40, round = 1.5;
     [[o, o, 1, 1], [W - o, o, -1, 1], [o, H - o, 1, -1], [W - o, H - o, -1, -1]].forEach(([x, y, sx, sy]) => {
       ctx.beginPath();
-      ctx.moveTo(x + L * sx, y); ctx.lineTo(x, y); ctx.lineTo(x, y + L * sy);
-      ctx.strokeStyle = c; ctx.lineWidth = w; ctx.lineCap = "square"; ctx.stroke();
+      ctx.moveTo(x + L * sx, y); ctx.arcTo(x, y, x, y + L * sy, round); ctx.lineTo(x, y + L * sy);
+      ctx.strokeStyle = c; ctx.lineWidth = w; ctx.lineCap = "round"; ctx.stroke();
     });
   }
 
@@ -151,7 +184,7 @@
   function fitTitle(ctx, text, maxW, wrap) {
     const fits = (fs, lines) => {
       ctx.font = titleFont(fs);
-      return lines.every((l) => ctx.measureText(l).width <= maxW);
+      return lines.every((l) => spacedWidth(ctx, l, 0, TEXT_TITLE) <= maxW);
     };
     for (let fs = 92; fs >= (wrap > 1 ? 64 : 44); fs -= 2) if (fits(fs, [text])) return { fs, lines: [text] };
     if (wrap > 1) {
@@ -170,7 +203,7 @@
     let cur = "";
     for (const t of tokens) {
       const next = cur + t;
-      if (cur.trim() && ctx.measureText(next.trimEnd()).width > maxW && !/^[\s、。，．,.!?！？…ー）」』】〕\])]/.test(t)) {
+      if (cur.trim() && spacedWidth(ctx, next.trimEnd(), 0, TEXT_TITLE) > maxW && !/^[\s、。，．,.!?！？…ー）」』】〕\])]/.test(t)) {
         lines.push(cur.trim());
         cur = t.trimStart();
       } else cur = next;
@@ -178,6 +211,9 @@
     if (cur.trim()) lines.push(cur.trim());
     return lines;
   }
+
+  // サブタイトルの前の伸ばし棒の長さと、サブタイトルの左端
+  const SUB_DASH = 43, SUB_X = 58 + SUB_DASH + 20;
 
   // タイトルとサブタイトル。下端の y を返す
   // 回数（d.vol.pos で置き場所が変わる）
@@ -216,7 +252,7 @@
       x += inlineW(fs);
     }
     ctx.font = titleFont(fs);
-    fxText(ctx, S, d.fx, (dx) => lines.forEach((l, i) => ctx.fillText(l, x + dx, base + i * lh)), GLOW);
+    fxText(ctx, S, d.fx, (dx) => lines.forEach((l, i) => fillSpaced(ctx, l, x + dx, base + i * lh, 0, TEXT_TITLE)), GLOW);
     let bottom = top + 1.05 * fs + (lines.length - 1) * lh;
 
     const after = volAt(d, "sub");
@@ -227,13 +263,17 @@
     if (d.sub) {
       const top = bottom + 14;
       ctx.font = `400 28px ${FONT_JP}`;
+      // 伸ばし棒（長さ SUB_DASH、端は丸）と文字
       fxText(ctx, S, d.fx, (dx) => {
-        ctx.fillRect(58 + dx, top + 20.25 - 0.75, 36, 1.5);
-        fillSpaced(ctx, d.sub, 108 + dx, top + 32.5, 28 * 0.12);
+        ctx.save();
+        ctx.beginPath(); ctx.moveTo(58 + dx + 0.75, top + 20.25); ctx.lineTo(58 + dx + SUB_DASH - 0.75, top + 20.25);
+        ctx.strokeStyle = ctx.fillStyle; ctx.lineWidth = 1.5; ctx.lineCap = "round"; ctx.stroke();
+        ctx.restore();
+        fillSpaced(ctx, d.sub, SUB_X + dx, top + 32.5, 28 * 0.12);
       }, GLOW);
       if (after) {
         const subW = spacedWidth(ctx, d.sub, 28 * 0.12);
-        volText(ctx, S, d, after, 24, 108 + subW + 14, top + 32.5, 0.85);
+        volText(ctx, S, d, after, 24, SUB_X + subW + 14, top + 32.5, 0.85);
       }
       bottom = top + 40;
     }
@@ -339,42 +379,66 @@
     }
   }
 
-  const LOGO_FROM_BOTTOM = 71;
+  // 右上の表（DATE など）の右端と 1 行目のベースライン
+  const INFO_RIGHT = 58, INFO_TOP = 81.9;
+  // 右下のロゴ（# ・作アイコン・るっちゃん）。文字の大きさ、アイコンの大きさ、それぞれの間
+  const LOGO = { text: 21, icon: 47, gap: 7 };
+  // ロゴは右上の表と同じだけ画面の端から離す。上下は表の 1 行目の文字の上端とアイコンの下端、
+  // 左右は表と「るっちゃん」の文字の右端（字の中の空きは除く）をそろえる。アイコンの中心の y と、文字の送りの右端を返す
+  function logoBox(ctx, d, W, H) {
+    const keep = ctx.font;
+    const date = d.dateText || "2026/10/21";
+    ctx.font = `400 ${21 * TEXT_SMALL.scale}px ${FONT_MONO}`;
+    const top = INFO_TOP - ctx.measureText(date).actualBoundingBoxAscent;
+    const last = ctx.measureText(date.slice(-1));
+    const right = INFO_RIGHT + 21 * 0.06 + (last.width - last.actualBoundingBoxRight);
+    ctx.font = `800 ${LOGO.text}px ${FONT_LOGO}`;
+    const n = ctx.measureText("ん");
+    ctx.font = keep;
+    return { cy: H - top - LOGO.icon / 2, right: W - right + (n.width - n.actualBoundingBoxRight) };
+  }
   function logo(ctx, S, d, icon, W, H) {
     const glow = { color: "rgba(70,80,105,.35)", blur: 14 };
-    const cy = H - LOGO_FROM_BOTTOM, right = W - 54;
-    ctx.font = `800 30px ${FONT_LOGO}`;
+    const { cy, right } = logoBox(ctx, d, W, H);
+    const ts = LOGO.text, hs = (ts * 28) / 30, is = LOGO.icon, g = LOGO.gap;
+    ctx.font = `800 ${ts}px ${FONT_LOGO}`;
     const tw = ctx.measureText("るっちゃん").width;
-    ctx.font = `800 28px ${FONT_LOGO}`;
+    ctx.font = `800 ${hs}px ${FONT_LOGO}`;
     const hw = ctx.measureText("#").width;
-    const total = hw + 2 + 6 + 58 + 6 + tw;
-    const x0 = right - total;
-    const ix = x0 + hw + 2 + 6 + 2;
+    const x0 = right - (hw + g + is + g + tw);
+    const ix = x0 + hw + g;
 
-    ctx.font = `800 28px ${FONT_LOGO}`;
-    fxText(ctx, S, d.fx, (o) => ctx.fillText("#", x0 + o, cy + 10.6), glow);
+    fxText(ctx, S, d.fx, (o) => ctx.fillText("#", x0 + o, cy + 0.378 * hs), glow);
     if (icon && icon.naturalWidth) {
       if (d.fx) {
-        ctx.save(); ctx.globalAlpha = 0.4; ctx.drawImage(tinted(icon, "rgb(255,70,110)"), ix - 1.5, cy - 27, 54, 54); ctx.restore();
-        ctx.save(); ctx.globalAlpha = 0.45; ctx.drawImage(tinted(icon, "rgb(70,210,255)"), ix + 1.5, cy - 27, 54, 54); ctx.restore();
+        ctx.save(); ctx.globalAlpha = 0.4; ctx.drawImage(tinted(icon, "rgb(255,70,110)"), ix - 1.5, cy - is / 2, is, is); ctx.restore();
+        ctx.save(); ctx.globalAlpha = 0.45; ctx.drawImage(tinted(icon, "rgb(70,210,255)"), ix + 1.5, cy - is / 2, is, is); ctx.restore();
       }
-      ctx.drawImage(icon, ix, cy - 27, 54, 54);
+      ctx.drawImage(icon, ix, cy - is / 2, is, is);
     }
-    ctx.font = `800 30px ${FONT_LOGO}`;
-    fxText(ctx, S, d.fx, (o) => ctx.fillText("るっちゃん", ix + 54 + 2 + 6 + o, cy + 11.3), glow);
+    ctx.font = `800 ${ts}px ${FONT_LOGO}`;
+    fxText(ctx, S, d.fx, (o) => ctx.fillText("るっちゃん", ix + is + g + o, cy + 0.377 * ts), glow);
+  }
+
+  // Agave は js/assets.js に埋め込んだものを、英数字の範囲だけのフォントとして登録する
+  let agaveAdded = false;
+  function addAgave() {
+    const src = window.THUMB_ASSETS && window.THUMB_ASSETS.fonts && window.THUMB_ASSETS.fonts.agave;
+    if (agaveAdded || !src || !window.FontFace) return;
+    document.fonts.add(new FontFace("Agave", `url(${src})`, { unicodeRange: LATIN_RANGE }));
+    agaveAdded = true;
   }
 
   // フォントを先に読み込む（Google Fonts は文字ごとに分割配信なので、使う文字を渡す）
   async function ensureFonts(d) {
     if (!document.fonts || !document.fonts.load) return;
+    addAgave();
     const sp = d.speakers.map((s) => `[ ${s.label} ]`).join("");
     const vol = d.vol ? d.vol.text + d.vol.key + d.vol.value : "";
-    const mono = ["DATE", "DAY", "TIME", "BY", d.dateText, d.day, d.time, sp, vol].join("");
+    const text = [d.title, d.sub, d.by, "DATE", "DAY", "TIME", "BY", d.dateText, d.day, d.time, sp, vol].join("");
     const loads = [
-      document.fonts.load(`500 92px "Noto Sans JP"`, d.title + d.by + vol),
-      document.fonts.load(`500 20px "JetBrains Mono"`, vol || "0"),
-      document.fonts.load(`400 28px "Noto Sans JP"`, d.sub || "あ"),
-      document.fonts.load(`400 21px "JetBrains Mono"`, mono),
+      document.fonts.load(`400 92px ${FONT_KANA}`, text || "あ"),
+      document.fonts.load(`400 21px "Agave"`, "0"),
       document.fonts.load(`800 30px "M PLUS Rounded 1c"`, "#るっちゃん"),
     ];
     try { await Promise.all(loads); } catch (e) { /* offline: fall back to system fonts */ }
@@ -431,11 +495,11 @@
       ctx.save();
       ctx.globalAlpha = 0.16;
       ctx.fillStyle = "#fff";
-      ctx.fillText(big.text, BW - 40 - w, BH - 40);
+      fillSpaced(ctx, big.text, BW - 40 - w, BH - 40, 0);
       ctx.restore();
     }
 
-    const side = { right: BW - 58, top: 81.9 };
+    const side = { right: BW - INFO_RIGHT, top: INFO_TOP };
     const infoLeft = infoBlock(ctx, S, d, side, true).left;
     const sideTitleW = Math.min(BW - 116, infoLeft - 58 - 40);
     let header = L.header;
@@ -451,10 +515,11 @@
 
     const sps = d.speakers.slice(0, 4);
     const n = Math.max(1, sps.length);
+    const logoCy = logoBox(ctx, d, BW, BH).cy;
     let places;
     if (L.grid) {
       const top = headerBottom + 40;
-      const bottom = BH - (d.showLogo || volAt(d, "corner") ? LOGO_FROM_BOTTOM + 27 + 16 : 44);
+      const bottom = d.showLogo || volAt(d, "corner") ? logoCy - LOGO.icon / 2 - 16 : BH - 44;
       places = gridPlacement(n, { x: 58, y: top, w: BW - 116, h: bottom - top });
     } else {
       const D = ICON_D[n], step = D + SPEAKER_PAD;
@@ -465,7 +530,7 @@
     if (d.showLogo) logo(ctx, S, d, assets.logoIcon, BW, BH);
     // 左下。ロゴと同じ高さにそろえる
     const corner = volAt(d, "corner");
-    if (corner) volText(ctx, S, d, corner, 44, 60, BH - LOGO_FROM_BOTTOM + 16, 0.9);
+    if (corner) volText(ctx, S, d, corner, 44, 60, logoCy + 16, 0.9);
   }
 
   window.ThumbRenderer = { draw, ensureFonts, LAYOUTS };
