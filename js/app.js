@@ -157,19 +157,37 @@
   }
 
   // ---------- preview ----------
+  // プレビューでは背景の光の帯を流し続ける。書き出しは、ボタンを押したときに見えている瞬間で止める
   const canvas = document.getElementById("preview");
-  let queued = false;
-  function schedule() {
-    if (queued) return;
-    queued = true;
-    requestAnimationFrame(async () => {
-      queued = false;
-      const d = view();
-      await R.ensureFonts(d);
-      resizePreview();
-      R.draw(canvas, d, { logoIcon }, state.ratio);
-    });
+  const WAVE_SPEED = 0.35; // 帯が流れる速さ（実時間に対する倍率）
+  const FRAME_MS = 1000 / 30; // 描き直しは 1 秒に 30 回まで
+  const reduceMotion = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : { matches: false };
+  let waveT = 51, current = null, dirty = true, busy = false, lastDraw = 0;
+  // 文字・アイコンなど（背景以外）は入力が変わったときだけここに描き、毎フレームは背景の上に重ねるだけにする
+  const front = document.createElement("canvas");
+  // 入力が変わったら、次のフレームで view() を作り直す
+  function schedule() { dirty = true; }
+  async function frame(now) {
+    requestAnimationFrame(frame);
+    const animate = !reduceMotion.matches;
+    if (busy || (!dirty && (!animate || now - lastDraw < FRAME_MS))) return;
+    if (animate && lastDraw) waveT += (Math.min(100, now - lastDraw) / 1000) * WAVE_SPEED;
+    lastDraw = now;
+    resizePreview();
+    if (dirty || !current) {
+      dirty = false;
+      busy = true;
+      current = view();
+      try { await R.ensureFonts(current); } finally { busy = false; }
+      front.width = canvas.width; front.height = canvas.height;
+      R.draw(front, current, { logoIcon }, state.ratio, "front");
+    }
+    R.draw(canvas, { ...current, waveT }, { logoIcon }, state.ratio, "back");
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(front, 0, 0);
   }
+  requestAnimationFrame(frame);
   // プレビューは長辺 1920px で描く
   function resizePreview() {
     const L = R.LAYOUTS[state.ratio] || R.LAYOUTS["16x9"];
@@ -299,7 +317,7 @@
   });
   const status = document.getElementById("status");
   document.getElementById("download").addEventListener("click", async () => {
-    const d = view();
+    const d = { ...view(), waveT };
     await R.ensureFonts(d);
     const [W, H] = sizeOf();
     const c = document.createElement("canvas");

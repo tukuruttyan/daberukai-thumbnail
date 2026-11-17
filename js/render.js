@@ -25,7 +25,7 @@
   const RED = "rgba(255,70,110,.45)", CYAN = "rgba(70,210,255,.5)";
   // 色ズレ（赤と青を左右にずらして重ねる）: text = 文字・ロゴのずれ（px）、icon = アイコンの円のずれ（px）、
   // alpha = 色の濃さの倍率、blur = 色をぼかす量（px）。px はデザイン座標
-  const CA = { text: 1.5, icon: 3, alpha: 1, blur: 0 };
+  const CA = { text: 1.5, icon: 4.3, alpha: 0.7, blur: 2.75 };
   function caLayer(ctx, S, fn) {
     ctx.save();
     ctx.globalAlpha *= CA.alpha;
@@ -583,7 +583,9 @@
     return out;
   }
 
-  function draw(canvas, d, assets, layoutId) {
+  // layer: 省略 = 全部、"back" = 背景（一色・粒・光の帯）だけ、"front" = それ以外だけ（背景は透明）。
+  // プレビューで光の帯を流すときに、毎フレーム描き直すのを背景だけにするために分けている
+  function draw(canvas, d, assets, layoutId, layer) {
     const L = LAYOUTS[layoutId] || LAYOUTS["16x9"];
     const BW = L.W, BH = L.H;
     const W = canvas.width, H = canvas.height, S = W / BW;
@@ -595,11 +597,14 @@
     ctx.textAlign = "left";
 
     const Lt = lightOf(d);
-    background(ctx, BW, BH, Lt);
-    grain(ctx, W, H);
-    ctx.setTransform(S, 0, 0, S, 0, 0);
-    fog(ctx, BW, BH, Lt);
-    if (d.wave !== false) ribbons(ctx, S, BW, BH, d.waveT == null ? RIBBON_T : d.waveT);
+    if (layer !== "front") {
+      background(ctx, BW, BH, Lt);
+      grain(ctx, W, H);
+      ctx.setTransform(S, 0, 0, S, 0, 0);
+      fog(ctx, BW, BH, Lt);
+      if (d.wave !== false) ribbons(ctx, S, BW, BH, d.waveT == null ? RIBBON_T : d.waveT);
+      if (layer === "back") return;
+    }
     cornerTicks(ctx, BW, BH);
     const big = volAt(d, "big");
     if (big) {
