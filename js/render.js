@@ -400,19 +400,32 @@
     ctx.restore();
   }
 
-  function speakerBlock(ctx, S, d, sp, cx, cy, D) {
+  // part: 省略 = 全部、"label" = 名前だけ、"shadow" = アイコンの下の影だけ、"icon" = 影と名前を除いたアイコン
+  //   （白い円・色ズレ・写真・ふちの光）。喋ったときにアイコンだけを跳ねさせるために分けている。
+  //   opt.under: ミュート中に写真を透かす色（"icon" だけを透明な所に描くときは、まわりの色が読めないので渡す）
+  function speakerBlock(ctx, S, d, sp, cx, cy, D, part, opt) {
     const r = D / 2;
-    // 周りの白い円。影より先に描くので、内側は影がかかって少し灰色になる
-    circle(ctx, cx, cy, r + RING.gap + RING.w / 2);
-    ctx.strokeStyle = lineColor(d, RING.alpha); ctx.lineWidth = RING.w; ctx.stroke();
-
-    // drop shadow
+    if (part === "shadow") { dropShadow(ctx, S, cx, cy, r); return; }
+    if (part !== "label") speakerIcon(ctx, S, d, sp, cx, cy, D, part === "icon", opt || {});
+    if (part !== "icon" && part !== "shadow") speakerLabel(ctx, S, d, sp, cx, cy, r);
+  }
+  // アイコンの下の影（白い円の影だけを描く。円そのものは写真の下に隠れる）
+  function dropShadow(ctx, S, cx, cy, r) {
     ctx.save();
     ctx.shadowColor = "rgba(70,80,110,.35)";
     ctx.shadowBlur = 60 * S;
     ctx.shadowOffsetY = 24 * S;
     circle(ctx, cx, cy, r); ctx.fillStyle = "#fff"; ctx.fill();
     ctx.restore();
+  }
+  function speakerIcon(ctx, S, d, sp, cx, cy, D, noShadow, opt) {
+    const r = D / 2;
+    // 周りの白い円。影より先に描くので、内側は影がかかって少し灰色になる
+    circle(ctx, cx, cy, r + RING.gap + RING.w / 2);
+    ctx.strokeStyle = lineColor(d, RING.alpha); ctx.lineWidth = RING.w; ctx.stroke();
+
+    if (noShadow) { circle(ctx, cx, cy, r); ctx.fillStyle = "#fff"; ctx.fill(); }
+    else dropShadow(ctx, S, cx, cy, r);
     // chromatic edges
     if (d.fx && !d.muted) caLayer(ctx, S, () => {
       circle(ctx, cx + CA.icon, cy, r); ctx.fillStyle = "rgba(70,210,255,.45)"; ctx.fill();
@@ -421,7 +434,7 @@
     // ミュート中は、写真を透かした下に見せる色として、ふちのすぐ外（影の上）の色の平均を取っておく。
     // 白い円にかからないよう、その外側を読む
     const o = RING.gap + RING.w;
-    const under = d.muted ? bandColor(ctx, cx, cy, r + o + 6, r + o + 12) : "#fff";
+    const under = d.muted ? opt.under || bandColor(ctx, cx, cy, r + o + 6, r + o + 12) : "#fff";
     // 写真のふちにぴったりつく細い白線
     circle(ctx, cx, cy, r + 1.5); ctx.fillStyle = lineColor(d, 1); ctx.fill();
 
@@ -477,8 +490,8 @@
     }
     ctx.restore();
     rimGlow(ctx, S, d, cx, cy, r);
-
-    // label
+  }
+  function speakerLabel(ctx, S, d, sp, cx, cy, r) {
     if (sp.label) {
       const text = `[ ${sp.label} ]`;
       ctx.font = `400 13px ${FONT_MONO}`;
@@ -646,13 +659,28 @@
       places = sps.map((_, i) => ({ cx: BW / 2 + (i - (n - 1) / 2) * step, cy: 384, D }));
     }
     const dl = { ...d, layoutSize: { W: BW, H: BH } };
-    sps.forEach((sp, i) => speakerBlock(ctx, S, dl, sp, places[i].cx, places[i].cy, places[i].D));
+    // d.icons === false なら、アイコンは描かずに名前だけ（アイコンは drawIcon で別に重ねる）
+    sps.forEach((sp, i) => speakerBlock(ctx, S, dl, sp, places[i].cx, places[i].cy, places[i].D, d.icons === false ? "label" : undefined));
 
     if (d.showLogo) logo(ctx, S, d, assets.logoIcon, BW, BH);
     // 左下。ロゴと同じ高さにそろえる
     const corner = volAt(d, "corner");
     if (corner) volText(ctx, S, d, corner, 44, 60, logoCy + 16, 0.9);
+    // 登壇者アイコンの位置（デザイン座標）。drawIcon で別に重ねるときに使う
+    return places.slice(0, sps.length).map((p) => ({ cx: p.cx, cy: p.cy, D: p.D, r: p.D / 2, ring: p.D / 2 + RING.gap + RING.w }));
   }
 
-  window.ThumbRenderer = { draw, ensureFonts, LAYOUTS, CA };
+  // 登壇者アイコン 1 つを canvas に重ねる（canvas は消さない）。place は draw が返した位置。
+  //   part: "shadow" = 下の影だけ、"icon" = 影と名前を除いたアイコン、dy: 上下にずらす量（デザイン座標。上がマイナス）
+  //   opt.under: ミュート中に写真を透かす色（speakerBlock を参照）
+  function drawIcon(canvas, d, sp, place, layoutId, part, dy, opt) {
+    const L = LAYOUTS[layoutId] || LAYOUTS["16x9"], S = canvas.width / L.W;
+    const ctx = canvas.getContext("2d");
+    ctx.save();
+    ctx.setTransform(S, 0, 0, S, 0, 0);
+    speakerBlock(ctx, S, { ...d, layoutSize: { W: L.W, H: L.H } }, sp, place.cx, place.cy + (dy || 0), place.D, part, opt);
+    ctx.restore();
+  }
+
+  window.ThumbRenderer = { draw, drawIcon, ensureFonts, LAYOUTS, CA };
 })();

@@ -157,7 +157,7 @@
   }
 
   // ---------- preview ----------
-  // プレビューでは背景の光の帯を流し続ける。書き出しは、ボタンを押したときに見えている瞬間で止める
+  // プレビューでは背景の光の帯を流し続ける。書き出しはいつも同じ瞬間（render.js の RIBBON_T）で止める
   const canvas = document.getElementById("preview");
   const WAVE_SPEED = 0.35; // 帯が流れる速さ（実時間に対する倍率）
   const FRAME_MS = 1000 / 30; // 描き直しは 1 秒に 30 回まで
@@ -317,7 +317,9 @@
   });
   const status = document.getElementById("status");
   document.getElementById("download").addEventListener("click", async () => {
-    const d = { ...view(), waveT };
+    // 帯はいつも同じ形で書き出す（waveT を渡さない）。studio は通常とミュート中の 2 枚を
+    // 切り替えるので、アイコン以外が 1 ピクセルもずれないようにする
+    const d = view();
     await R.ensureFonts(d);
     const [W, H] = sizeOf();
     const c = document.createElement("canvas");
