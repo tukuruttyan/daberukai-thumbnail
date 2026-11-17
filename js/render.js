@@ -23,11 +23,21 @@
   const FONT_MONO = FONT_JP;
   const FONT_LOGO = '"M PLUS Rounded 1c", "Hiragino Maru Gothic ProN", sans-serif';
   const RED = "rgba(255,70,110,.45)", CYAN = "rgba(70,210,255,.5)";
+  // 色ズレ（赤と青を左右にずらして重ねる）: text = 文字・ロゴのずれ（px）、icon = アイコンの円のずれ（px）、
+  // alpha = 色の濃さの倍率、blur = 色をぼかす量（px）。px はデザイン座標
+  const CA = { text: 1.5, icon: 3, alpha: 1, blur: 0 };
+  function caLayer(ctx, S, fn) {
+    ctx.save();
+    ctx.globalAlpha *= CA.alpha;
+    if (CA.blur > 0) ctx.filter = `blur(${CA.blur * S}px)`;
+    fn();
+    ctx.restore();
+  }
 
   // 人数ごとのアイコン直径（横一列のとき / grid のときの上限）
   const ICON_D = { 1: 250, 2: 232, 3: 200, 4: 168 };
   const GRID_MAX_D = { 1: 300, 2: 260, 3: 240, 4: 220 };
-  // アイコン 1 つが占める幅と高さ = 直径 + これ（十字の目盛り・ラベル・すき間）
+  // アイコン 1 つが占める幅と高さ = 直径 + これ（白い円・ラベル・すき間）
   const SPEAKER_PAD = 136;
 
   // ---- noise (seeded so every export is identical) ----
@@ -123,36 +133,34 @@
       draw(-10000);
       ctx.restore();
     }
-    if (fx) {
-      ctx.fillStyle = CYAN; draw(1.5);
-      ctx.fillStyle = RED; draw(-1.5);
-    }
+    if (fx) caLayer(ctx, S, () => {
+      ctx.fillStyle = CYAN; draw(CA.text);
+      ctx.fillStyle = RED; draw(-CA.text);
+    });
     ctx.fillStyle = color;
     draw(0);
   }
 
   // ミュート中の見た目（話者アイコンを光らせる動画で、ミュートした区間に使う）。
-  // 輪・十字・ふち・名前を灰色にして薄くし、写真は色を抜いてまわりの色に透かす
+  // ふち・名前を灰色にして薄くし、写真は色を抜いてまわりの色に透かす
   const MUTED = { rgb: "119,123,131", line: 0.6, photoGray: 0.85, photoAlpha: 0.75 };
   const lineColor = (d, a) => (d.muted ? `rgba(${MUTED.rgb},${a * MUTED.line})` : `rgba(255,255,255,${a})`);
 
-  function line(ctx, x1, y1, x2, y2, color, width) {
-    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
-    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke();
-  }
   function circle(ctx, cx, cy, r) { ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); }
 
   // ---- layers ----
+  // 光（背景の下からの光とアイコンの光沢）。d.light で上書きできる（アニメーション用）
+  //   x, y: 光の中心（画面に対する割合）  fog: 光だまりの濃さの倍率  size: 光だまりの大きさの倍率
+  //   sheen: アイコンの光沢の濃さの倍率  angle: 光沢の向き（CSS の linear-gradient の角度。140 = 左上が光る）
+  //   follow: true なら angle の代わりに、光の中心に向いた側を光らせる
+  //   glint: 0〜1 なら、光沢の上を細い光の帯がその位置まで横切る（null なら出さない）
+  const LIGHT = { x: 0.5, y: 0.95, fog: 0, size: 1, sheen: 1, angle: 140, follow: false, glint: null };
+  const lightOf = (d) => ({ ...LIGHT, ...(d.light || {}) });
+
+  // 背景は一色（前は下の真ん中が明るい円形のグラデーションだった）
   function background(ctx, W, H) {
-    // radial-gradient(110% 80% at 50% 95%, #c9ccd5 0%, #a7acb8 45%, #8a909e 100%)
-    const cx = W / 2, cy = H * 0.95, rx = W * 1.1, ry = H * 0.8, k = ry / rx;
-    ctx.save();
-    ctx.translate(cx, cy); ctx.scale(1, k);
-    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
-    g.addColorStop(0, "#c9ccd5"); g.addColorStop(0.45, "#acb1bd"); g.addColorStop(1, "#9096a3");
-    ctx.fillStyle = g;
-    ctx.fillRect(-cx, -cy / k, W, H / k);
-    ctx.restore();
+    ctx.fillStyle = "#a7acb8";
+    ctx.fillRect(0, 0, W, H);
   }
   function grain(ctx, W, H) {
     ctx.save();
@@ -162,15 +170,54 @@
     ctx.drawImage(noise(W, H), 0, 0);
     ctx.restore();
   }
-  function fog(ctx, W, H) {
-    const cx = W / 2, cy = H * 0.95, rx = W * 0.6, ry = H * 0.35, k = ry / rx;
+  function fog(ctx, W, H, Lt) {
+    const cx = W * Lt.x, cy = H * Lt.y, rx = W * 0.6 * Lt.size, ry = H * 0.35 * Lt.size, k = ry / rx;
     ctx.save();
     ctx.translate(cx, cy); ctx.scale(1, k);
     const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
-    g.addColorStop(0, "rgba(255,255,255,.55)");
+    g.addColorStop(0, `rgba(255,255,255,${Math.min(1, 0.55 * Lt.fog)})`);
     g.addColorStop(0.7, "rgba(255,255,255,0)");
     ctx.fillStyle = g;
     ctx.fillRect(-rx, -rx, rx * 2, rx * 2);
+    ctx.restore();
+  }
+  // 背景の光の帯。細い糸を束ねた帯が、ねじれながら横へ流れる。
+  //   手前の二本：細くてほぼまっすぐな一本＝テーマ（ちょっとだけ気合）、幅広で大きくうねる一本＝だべり（好きなようにだべる）
+  //   奥の二本：画面の上と下を流れる、細い糸だけの広い帯（画面ぜんたいの密度）
+  //   amp = うねりの大きさ、hw = 帯の幅の半分、len = うねりの長さ、speed = 流れる速さ（px/秒。負なら左へ）、
+  //   dy = 高さのずれ、n = 糸の数、lw = 糸の太さ、a = 糸の濃さ、tw = ねじれの強さ、glow = ぼんやりした光の太さ（0 なら無し）
+  const RIBBONS = [
+    { amp: 90, hw: 260, len: 1900, speed: 12, seed: 5.3, dy: -185, n: 24, lw: 0.5, a: 0.07, tw: 1.95, glow: 0 },
+    { amp: -100, hw: 300, len: 2400, speed: -9, seed: 1.9, dy: 195, n: 24, lw: 0.5, a: 0.07, tw: 1.95, glow: 0 },
+    { amp: 12, hw: 20, len: 2200, speed: 8, seed: 0.9, dy: 0, n: 18, lw: 1, a: 0.085, tw: 1, glow: 30 },
+    { amp: -128, hw: 86, len: 1300, speed: -18, seed: 3.7, dy: 0, n: 30, lw: 1, a: 0.06, tw: 1, glow: 70 },
+  ];
+  // 止め絵で使う時刻（秒）。動かすときは d.waveT を進める（試作では実時間の 0.35 倍で進めた）
+  const RIBBON_T = 51, RIBBON_BLUR = 18;
+  function ribbons(ctx, S, W, H, t) {
+    const TAU = Math.PI * 2, y0 = (H * 384) / 720;
+    ctx.save();
+    ctx.strokeStyle = "#fff"; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    RIBBONS.forEach((o) => {
+      const cy = (x) => { const p = ((x - o.speed * t) / o.len) * TAU + o.seed; return o.amp * (0.7 * Math.sin(p) + 0.3 * Math.sin(p * 2.2 + o.seed + t * 0.08)); };
+      const hw = (x) => o.hw * (0.68 + 0.5 * Math.sin((x / (o.len * 1.7)) * TAU + t * 0.11 + o.seed * 2));
+      const tw = (x) => ((x / (o.len * 1.3)) * Math.PI + t * 0.13) * o.tw + o.seed;
+      const path = (th) => {
+        ctx.beginPath();
+        for (let x = -20; x <= W + 20; x += 14) {
+          const y = y0 + o.dy + cy(x) + hw(x) * Math.cos(th + tw(x));
+          x === -20 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+      };
+      ctx.globalAlpha = o.a; ctx.lineWidth = o.lw;
+      for (let i = 0; i <= o.n; i++) { path((i / o.n) * Math.PI); ctx.stroke(); }
+      if (o.glow) {
+        ctx.filter = `blur(${RIBBON_BLUR * S}px)`;
+        ctx.globalAlpha = o.a * 1.6; ctx.lineWidth = o.glow;
+        path(Math.PI / 2); ctx.stroke();
+        ctx.filter = "none";
+      }
+    });
     ctx.restore();
   }
   // 四隅のカギ。角と端を少し丸める
@@ -334,22 +381,30 @@
     return n ? `rgb(${sum.map((v) => Math.round(v / n)).join(",")})` : "#fff";
   }
 
+  // アイコンの周りの白い円: 写真のふちからのすき間・線の太さ・濃さ（px はデザイン座標）
+  const RING = { gap: 15, w: 3.5, alpha: 1 };
+  // 写真のフチの線の光: 遠くまで広がる弱い光 → 近くの強い光（blur はデザイン座標の px、alpha が 1 を超えた分は重ね塗り）
+  const RIM_GLOW = [{ blur: 73, alpha: 1.68, extra: 6 }, { blur: 5.5, alpha: 1.32, extra: 2 }];
+  function rimGlow(ctx, S, d, cx, cy, r) {
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    ctx.strokeStyle = lineColor(d, 1);
+    RIM_GLOW.forEach(({ blur, alpha, extra }) => {
+      ctx.filter = `blur(${blur * S}px)`;
+      ctx.lineWidth = 1.5 + extra;
+      for (let n = alpha; n > 0; n -= 1) {
+        ctx.globalAlpha = Math.min(1, n);
+        circle(ctx, cx, cy, r + 0.75); ctx.stroke();
+      }
+    });
+    ctx.restore();
+  }
+
   function speakerBlock(ctx, S, d, sp, cx, cy, D) {
     const r = D / 2;
-    // rings
-    circle(ctx, cx, cy, r + 26 - 0.5);
-    ctx.strokeStyle = lineColor(d, 0.55); ctx.lineWidth = 1; ctx.stroke();
-    ctx.save();
-    ctx.setLineDash([3, 3]);
-    circle(ctx, cx, cy, r + 14 - 0.5);
-    ctx.strokeStyle = lineColor(d, 0.35); ctx.stroke();
-    ctx.restore();
-    // crosshair ticks
-    const tc = lineColor(d, 0.8);
-    line(ctx, cx - r - 46, cy, cx - r - 30, cy, tc, 1);
-    line(ctx, cx + r + 30, cy, cx + r + 46, cy, tc, 1);
-    line(ctx, cx, cy - r - 46, cx, cy - r - 30, tc, 1);
-    line(ctx, cx, cy + r + 30, cx, cy + r + 46, tc, 1);
+    // 周りの白い円。影より先に描くので、内側は影がかかって少し灰色になる
+    circle(ctx, cx, cy, r + RING.gap + RING.w / 2);
+    ctx.strokeStyle = lineColor(d, RING.alpha); ctx.lineWidth = RING.w; ctx.stroke();
 
     // drop shadow
     ctx.save();
@@ -358,14 +413,17 @@
     ctx.shadowOffsetY = 24 * S;
     circle(ctx, cx, cy, r); ctx.fillStyle = "#fff"; ctx.fill();
     ctx.restore();
-    // chromatic edges + white rim
-    if (d.fx && !d.muted) {
-      circle(ctx, cx + 3, cy, r); ctx.fillStyle = "rgba(70,210,255,.45)"; ctx.fill();
-      circle(ctx, cx - 3, cy, r); ctx.fillStyle = "rgba(255,70,110,.35)"; ctx.fill();
-    }
-    // ミュート中は、写真を透かした下に見せる色として、ふちのすぐ外（影の上）の色の平均を取っておく
-    const under = d.muted ? bandColor(ctx, cx, cy, r + 6, r + 12) : "#fff";
-    circle(ctx, cx, cy, r + 1.5); ctx.fillStyle = lineColor(d, 0.9); ctx.fill();
+    // chromatic edges
+    if (d.fx && !d.muted) caLayer(ctx, S, () => {
+      circle(ctx, cx + CA.icon, cy, r); ctx.fillStyle = "rgba(70,210,255,.45)"; ctx.fill();
+      circle(ctx, cx - CA.icon, cy, r); ctx.fillStyle = "rgba(255,70,110,.35)"; ctx.fill();
+    });
+    // ミュート中は、写真を透かした下に見せる色として、ふちのすぐ外（影の上）の色の平均を取っておく。
+    // 白い円にかからないよう、その外側を読む
+    const o = RING.gap + RING.w;
+    const under = d.muted ? bandColor(ctx, cx, cy, r + o + 6, r + o + 12) : "#fff";
+    // 写真のふちにぴったりつく細い白線
+    circle(ctx, cx, cy, r + 1.5); ctx.fillStyle = lineColor(d, 1); ctx.fill();
 
     // image (cover, then user zoom/offset)
     ctx.save();
@@ -388,18 +446,37 @@
       ctx.fillStyle = under; ctx.fillRect(cx - r, cy - r, D, D);
       ctx.restore();
     }
-    // glassy sheen: linear-gradient(140deg, ...) with screen blend
-    const len = D * (Math.sin((40 * Math.PI) / 180) + Math.cos((40 * Math.PI) / 180));
-    const dx = Math.sin((140 * Math.PI) / 180), dy = -Math.cos((140 * Math.PI) / 180);
-    const g = ctx.createLinearGradient(cx - (dx * len) / 2, cy - (dy * len) / 2, cx + (dx * len) / 2, cy + (dy * len) / 2);
-    g.addColorStop(0, "rgba(255,255,255,.45)");
-    g.addColorStop(0.38, "rgba(255,255,255,0)");
-    g.addColorStop(0.7, "rgba(255,255,255,0)");
-    g.addColorStop(1, "rgba(200,225,255,.25)");
-    ctx.globalCompositeOperation = "screen";
-    ctx.fillStyle = g;
-    ctx.fillRect(cx - r, cy - r, D, D);
+    // glassy sheen: linear-gradient(140deg, ...) with screen blend（左上に白い光、右下にうっすら水色）
+    if (d.sheen !== false) {
+      const Lt = lightOf(d);
+      // follow のときは、光の中心からアイコンへ向かう向き（= 光に向いた側が明るい）
+      const L = d.layoutSize || { W: 1280, H: 720 };
+      const deg = Lt.follow ? (Math.atan2(cx - L.W * Lt.x, -(cy - L.H * Lt.y)) * 180) / Math.PI : Lt.angle;
+      const a = (deg * Math.PI) / 180;
+      const len = D * (Math.abs(Math.sin(a)) + Math.abs(Math.cos(a)));
+      const dx = Math.sin(a), dy = -Math.cos(a);
+      const g = ctx.createLinearGradient(cx - (dx * len) / 2, cy - (dy * len) / 2, cx + (dx * len) / 2, cy + (dy * len) / 2);
+      const k = Math.max(0, Lt.sheen);
+      g.addColorStop(0, `rgba(255,255,255,${Math.min(1, 0.45 * k)})`);
+      g.addColorStop(0.38, "rgba(255,255,255,0)");
+      g.addColorStop(0.7, "rgba(255,255,255,0)");
+      g.addColorStop(1, `rgba(200,225,255,${Math.min(1, 0.25 * k)})`);
+      ctx.globalCompositeOperation = "screen";
+      ctx.fillStyle = g;
+      ctx.fillRect(cx - r, cy - r, D, D);
+      // 細い光の帯が斜めに横切る
+      if (Lt.glint != null) {
+        const p = -0.3 + Lt.glint * 1.6, gl = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
+        const st = (v, c) => { if (v > 0 && v < 1) gl.addColorStop(v, c); };
+        gl.addColorStop(0, "rgba(255,255,255,0)");
+        st(p - 0.12, "rgba(255,255,255,0)"); st(p, "rgba(255,255,255,.55)"); st(p + 0.12, "rgba(255,255,255,0)");
+        gl.addColorStop(1, "rgba(255,255,255,0)");
+        ctx.fillStyle = gl;
+        ctx.fillRect(cx - r, cy - r, D, D);
+      }
+    }
     ctx.restore();
+    rimGlow(ctx, S, d, cx, cy, r);
 
     // label
     if (sp.label) {
@@ -409,7 +486,7 @@
       const w = spacedWidth(ctx, text, spc);
       ctx.save();
       ctx.globalAlpha = d.muted ? 0.8 * MUTED.line : 0.8;
-      fxText(ctx, S, d.fx && !d.muted, (o) => fillSpaced(ctx, text, cx - w / 2 + o, cy + r + 58, spc), { color: "rgba(255,255,255,.25)", blur: 18 },
+      fxText(ctx, S, d.fx && !d.muted, (o) => fillSpaced(ctx, text, cx - w / 2 + o, cy + r + RING.gap + RING.w + 40, spc), { color: "rgba(255,255,255,.25)", blur: 18 },
         d.muted ? `rgb(${MUTED.rgb})` : "#fff");
       ctx.restore();
     }
@@ -446,10 +523,10 @@
 
     fxText(ctx, S, d.fx, (o) => ctx.fillText("#", x0 + o, cy + 0.378 * hs), glow);
     if (icon && icon.naturalWidth) {
-      if (d.fx) {
-        ctx.save(); ctx.globalAlpha = 0.4; ctx.drawImage(tinted(icon, "rgb(255,70,110)"), ix - 1.5, cy - is / 2, is, is); ctx.restore();
-        ctx.save(); ctx.globalAlpha = 0.45; ctx.drawImage(tinted(icon, "rgb(70,210,255)"), ix + 1.5, cy - is / 2, is, is); ctx.restore();
-      }
+      if (d.fx) caLayer(ctx, S, () => {
+        ctx.save(); ctx.globalAlpha *= 0.4; ctx.drawImage(tinted(icon, "rgb(255,70,110)"), ix - CA.text, cy - is / 2, is, is); ctx.restore();
+        ctx.save(); ctx.globalAlpha *= 0.45; ctx.drawImage(tinted(icon, "rgb(70,210,255)"), ix + CA.text, cy - is / 2, is, is); ctx.restore();
+      });
       ctx.drawImage(icon, ix, cy - is / 2, is, is);
     }
     ctx.font = `800 ${ts}px ${FONT_LOGO}`;
@@ -517,10 +594,12 @@
     ctx.textBaseline = "alphabetic";
     ctx.textAlign = "left";
 
-    background(ctx, BW, BH);
+    const Lt = lightOf(d);
+    background(ctx, BW, BH, Lt);
     grain(ctx, W, H);
     ctx.setTransform(S, 0, 0, S, 0, 0);
-    fog(ctx, BW, BH);
+    fog(ctx, BW, BH, Lt);
+    if (d.wave !== false) ribbons(ctx, S, BW, BH, d.waveT == null ? RIBBON_T : d.waveT);
     cornerTicks(ctx, BW, BH);
     const big = volAt(d, "big");
     if (big) {
@@ -561,7 +640,8 @@
       const D = ICON_D[n], step = D + SPEAKER_PAD;
       places = sps.map((_, i) => ({ cx: BW / 2 + (i - (n - 1) / 2) * step, cy: 384, D }));
     }
-    sps.forEach((sp, i) => speakerBlock(ctx, S, d, sp, places[i].cx, places[i].cy, places[i].D));
+    const dl = { ...d, layoutSize: { W: BW, H: BH } };
+    sps.forEach((sp, i) => speakerBlock(ctx, S, dl, sp, places[i].cx, places[i].cy, places[i].D));
 
     if (d.showLogo) logo(ctx, S, d, assets.logoIcon, BW, BH);
     // 左下。ロゴと同じ高さにそろえる
@@ -569,5 +649,5 @@
     if (corner) volText(ctx, S, d, corner, 44, 60, logoCy + 16, 0.9);
   }
 
-  window.ThumbRenderer = { draw, ensureFonts, LAYOUTS };
+  window.ThumbRenderer = { draw, ensureFonts, LAYOUTS, CA };
 })();

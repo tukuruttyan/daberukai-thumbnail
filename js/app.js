@@ -36,6 +36,7 @@
     by: "",
     fx: true,
     showLogo: true,
+    sheen: false,
     muted: false,
     format: "jpeg",
     ratio: "16x9",
@@ -149,6 +150,7 @@
       by: state.by.trim() || autoBy(),
       fx: state.fx,
       showLogo: state.showLogo,
+      sheen: state.sheen,
       muted: !!state.muted,
       speakers: state.speakers.map((s) => ({ label: s.label.trim(), zoom: s.zoom, ox: s.ox, oy: s.oy, img: imgFor(s.src) })),
     };
