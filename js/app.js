@@ -157,12 +157,24 @@
   }
 
   // ---------- preview ----------
-  // プレビューでは背景の光の帯を流し続ける。書き出しはいつも同じ瞬間（render.js の RIBBON_T）で止める
+  // 光の帯は RIBBON_ORIGIN からずっとプレビューと同じ速さで流れ続けている、という扱いにする。
+  // サムネはその回が始まる瞬間（開催日＋開始時刻）の形。同じ回の通常とミュート中の 2 枚は同じ形になる
+  const RIBBON_ORIGIN = new Date(2026, 0, 1);
+  const pageT = Math.random() * 1e6; // 日付が空のときだけ使う
+  function ribbonTime() {
+    const d = parseDate(state.date);
+    if (!d) return pageT;
+    const m = /(\d{1,2}):(\d{2})/.exec(state.time || "");
+    if (m) d.setHours(+m[1], +m[2]);
+    return ((d - RIBBON_ORIGIN) / 1000) * WAVE_SPEED;
+  }
+
+  // プレビューでは背景の光の帯を流し続ける。開いたとき・日時を変えたときは、その回が始まる瞬間の形から流す
   const canvas = document.getElementById("preview");
   const WAVE_SPEED = 0.35; // 帯が流れる速さ（実時間に対する倍率）
   const FRAME_MS = 1000 / 30; // 描き直しは 1 秒に 30 回まで
   const reduceMotion = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : { matches: false };
-  let waveT = 51, current = null, dirty = true, busy = false, lastDraw = 0;
+  let waveT = ribbonTime(), current = null, dirty = true, busy = false, lastDraw = 0;
   // 文字・アイコンなど（背景以外）は入力が変わったときだけここに描き、毎フレームは背景の上に重ねるだけにする
   const front = document.createElement("canvas");
   // 入力が変わったら、次のフレームで view() を作り直す
@@ -224,6 +236,7 @@
       else if (k === "size") state[k] = +el.value;
       else state[k] = el.value;
       if (k === "date") document.getElementById("day").placeholder = autoDay() || "自動";
+      if (k === "date" || k === "time") waveT = ribbonTime();
       save(); schedule();
     });
   });
@@ -317,9 +330,9 @@
   });
   const status = document.getElementById("status");
   document.getElementById("download").addEventListener("click", async () => {
-    // 帯はいつも同じ形で書き出す（waveT を渡さない）。studio は通常とミュート中の 2 枚を
+    // 帯の形は開催日時で決める（プレビューの今の瞬間は使わない）。studio は通常とミュート中の 2 枚を
     // 切り替えるので、アイコン以外が 1 ピクセルもずれないようにする
-    const d = view();
+    const d = { ...view(), waveT: ribbonTime() };
     await R.ensureFonts(d);
     const [W, H] = sizeOf();
     const c = document.createElement("canvas");
