@@ -2,7 +2,7 @@
   const A = window.THUMB_ASSETS;
   const R = window.ThumbRenderer;
   const KEY = "tsukurucchan-thumb:v1";
-  const MAX_SPEAKERS = 4;
+  const MAX_SPEAKERS = 5;
   const DAYS = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"];
   const MIME = { png: "image/png", jpeg: "image/jpeg", webp: "image/webp" };
   const EXT = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };
@@ -118,6 +118,41 @@
     return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null;
   }
   function autoDay() { const d = parseDate(state.date); return d ? DAYS[d.getDay()] : ""; }
+  // 名前からラベルを自動で作る（かな → ローマ字。漢字は読めないので落とす）
+  const KANA = {
+    あ:"a",い:"i",う:"u",え:"e",お:"o",か:"ka",き:"ki",く:"ku",け:"ke",こ:"ko",さ:"sa",し:"shi",す:"su",せ:"se",そ:"so",
+    た:"ta",ち:"chi",つ:"tsu",て:"te",と:"to",な:"na",に:"ni",ぬ:"nu",ね:"ne",の:"no",は:"ha",ひ:"hi",ふ:"fu",へ:"he",ほ:"ho",
+    ま:"ma",み:"mi",む:"mu",め:"me",も:"mo",や:"ya",ゆ:"yu",よ:"yo",ら:"ra",り:"ri",る:"ru",れ:"re",ろ:"ro",わ:"wa",ゐ:"i",ゑ:"e",を:"o",ん:"n",
+    が:"ga",ぎ:"gi",ぐ:"gu",げ:"ge",ご:"go",ざ:"za",じ:"ji",ず:"zu",ぜ:"ze",ぞ:"zo",だ:"da",ぢ:"ji",づ:"zu",で:"de",ど:"do",
+    ば:"ba",び:"bi",ぶ:"bu",べ:"be",ぼ:"bo",ぱ:"pa",ぴ:"pi",ぷ:"pu",ぺ:"pe",ぽ:"po",ゔ:"vu",
+    ぁ:"a",ぃ:"i",ぅ:"u",ぇ:"e",ぉ:"o",ゃ:"ya",ゅ:"yu",ょ:"yo",ゎ:"wa",
+  };
+  const YOON = { ゃ: "a", ゅ: "u", ょ: "o", ぁ: "a", ぃ: "i", ぅ: "u", ぇ: "e", ぉ: "o" };
+  function toRomaji(name) {
+    const s = name.normalize("NFKC").replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60));
+    let out = "", sokuon = false;
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      let r = KANA[c];
+      if (c === "っ") { sokuon = true; continue; }
+      if (r && s[i + 1] && "ゃゅょぁぃぅぇぉ".includes(s[i + 1]) && !"ゃゅょぁぃぅぇぉ".includes(c)) {
+        const v = YOON[s[++i]];
+        const base = r.replace(/[aiueo]$/, "");
+        r = /^(sh|ch|j)$/.test(base) && "ゃゅょ".includes(s[i]) ? base + v
+          : "ゃゅょ".includes(s[i]) ? base + "y" + v : base + v;
+      }
+      if (r) {
+        if (sokuon) r = (r.startsWith("ch") ? "t" : r[0]) + r;
+        if (c === "ん" && /^[aiueoy]/.test(KANA[s[i + 1]] || "")) r = "n'";
+        out += r;
+      } else if (c === "ー" || c === "-" || c === "~" || c === "〜") out += "-";
+      else if (/[A-Za-z0-9 ._]/.test(c)) out += c;
+      sokuon = false;
+    }
+    return out.replace(/\s+/g, " ").replace(/^[-\s]+|[-\s]+$/g, "").toUpperCase();
+  }
+  const labelOf = (s) => s.label.trim() || toRomaji(s.name);
+
   function autoBy() { return state.speakers.map((s) => s.name.trim()).filter(Boolean).join(", "); }
   // 回数。数字なら表記に合わせて整え、それ以外（「特別回」など）は書いたまま出す
   const VOL_STYLES = {
@@ -152,7 +187,7 @@
       showLogo: state.showLogo,
       sheen: state.sheen,
       muted: !!state.muted,
-      speakers: state.speakers.map((s) => ({ label: s.label.trim(), zoom: s.zoom, ox: s.ox, oy: s.oy, img: imgFor(s.src) })),
+      speakers: state.speakers.map((s) => ({ label: labelOf(s), zoom: s.zoom, ox: s.ox, oy: s.oy, img: imgFor(s.src) })),
     };
   }
 
@@ -254,13 +289,15 @@
       if (s.src) thumb.style.backgroundImage = `url("${s.src}")`;
       q(".sp-name").value = s.name;
       q(".sp-label").value = s.label;
+      const labelHint = () => { q(".sp-label").placeholder = toRomaji(s.name) || "SO-MA"; };
+      labelHint();
       q(".sp-zoom").value = Math.round(s.zoom * 100);
       q(".sp-ox").value = Math.round(s.ox * 100);
       q(".sp-oy").value = Math.round(s.oy * 100);
       const out = () => { q(".sp-zoom-out").textContent = Math.round(s.zoom * 100) + "%"; };
       out();
 
-      q(".sp-name").addEventListener("input", (e) => { s.name = e.target.value; document.getElementById("by").placeholder = autoBy() || "名前から自動"; save(); schedule(); });
+      q(".sp-name").addEventListener("input", (e) => { s.name = e.target.value; document.getElementById("by").placeholder = autoBy() || "名前から自動"; labelHint(); save(); schedule(); });
       q(".sp-label").addEventListener("input", (e) => { s.label = e.target.value; save(); schedule(); });
       q(".sp-zoom").addEventListener("input", (e) => { s.zoom = e.target.value / 100; out(); save(); schedule(); });
       q(".sp-ox").addEventListener("input", (e) => { s.ox = e.target.value / 100; save(); schedule(); });

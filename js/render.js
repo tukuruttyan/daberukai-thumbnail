@@ -35,10 +35,12 @@
   }
 
   // 人数ごとのアイコン直径（横一列のとき / grid のときの上限）
-  const ICON_D = { 1: 250, 2: 232, 3: 200, 4: 168 };
-  const GRID_MAX_D = { 1: 300, 2: 260, 3: 240, 4: 220 };
+  const ICON_D = { 1: 250, 2: 232, 3: 200, 4: 168, 5: 140 };
+  const GRID_MAX_D = { 1: 300, 2: 260, 3: 240, 4: 220, 5: 200 };
   // アイコン 1 つが占める幅と高さ = 直径 + これ（白い円・ラベル・すき間）
   const SPEAKER_PAD = 136;
+  // 横だけはここまで詰めてよい（白い円どうしの間が 60px ほど残る）
+  const SPEAKER_PAD_X = 104;
 
   // ---- noise (seeded so every export is identical) ----
   let noiseCache = null;
@@ -334,6 +336,23 @@
 
   // DATE / DAY / TIME / BY。pos.right を渡すと右寄せ（右上用）、pos.left を渡すと左寄せの表にする。
   // 左端の x と下端の y を返す（タイトルの最大幅や登壇者の位置を決めるため）
+  // 右上に置くときの値の最大幅。BY が長い（登壇者が多い）とタイトルが縮むので、超えたら名前の区切りで折り返す
+  const infoMaxW = (BW) => Math.max(280, BW * 0.26);
+  function splitValue(ctx, v, sp, maxW) {
+    const parts = v.split(/(?<=[,、，])\s*/);
+    const lines = [];
+    let cur = "";
+    for (const p of parts) {
+      const next = cur ? cur + " " + p : p;
+      if (cur && spacedWidth(ctx, next.trimEnd(), sp) > maxW) { lines.push(cur.trimEnd()); cur = p; }
+      else cur = next;
+    }
+    if (cur) lines.push(cur.trimEnd());
+    return lines;
+  }
+  // DATE / DAY / TIME / BY。pos.right を渡すと右寄せ（右上用）、pos.left を渡すと左寄せの表にする。
+  // pos.maxW を渡すと BY をその幅で折り返す。
+  // 左端の x と下端の y を返す（タイトルの最大幅や登壇者の位置を決めるため）
   function infoBlock(ctx, S, d, pos, measureOnly) {
     const info = volAt(d, "info");
     const rows = [info ? [info.key, info.value, info.jp] : [], ["DATE", d.dateText, false], ["DAY", d.day, false], ["TIME", d.time, false], ["BY", d.by, true]]
@@ -341,26 +360,34 @@
     ctx.font = `400 13px ${FONT_MONO}`;
     const keyCol = Math.max(0, ...rows.map((r) => spacedWidth(ctx, r[0], 13 * 0.06)));
     let minLeft = pos.right != null ? pos.right : pos.left;
+    let extra = 0; // 折り返した行の数。折り返しは詰めて（30px 間隔）並べる
     rows.forEach(([k, v, jp], i) => {
-      const base = pos.top + i * 36.75;
       ctx.font = jp ? `500 21px ${FONT_JP}` : `400 21px ${FONT_MONO}`;
       const sp = 21 * (jp ? 0.04 : 0.06);
-      const vw = spacedWidth(ctx, v, sp);
-      ctx.font = `400 13px ${FONT_MONO}`;
-      const kw = spacedWidth(ctx, k, 13 * 0.06);
-      const vx = pos.right != null ? pos.right - vw : pos.left + keyCol + 14;
-      const kx = pos.right != null ? vx - 14 - kw : pos.left;
-      minLeft = Math.min(minLeft, kx);
-      if (measureOnly) return;
-      const glow = { color: "rgba(255,255,255,.25)", blur: 18 };
-      ctx.save();
-      ctx.globalAlpha = 0.75;
-      fxText(ctx, S, d.fx, (dx) => fillSpaced(ctx, k, kx + dx, base, 13 * 0.06), glow);
-      ctx.restore();
-      ctx.font = jp ? `500 21px ${FONT_JP}` : `400 21px ${FONT_MONO}`;
-      fxText(ctx, S, d.fx, (dx) => fillSpaced(ctx, v, vx + dx, base, sp), glow);
+      const vals = jp && pos.maxW ? splitValue(ctx, v, sp, pos.maxW) : [v];
+      vals.forEach((val, j) => {
+        if (j) extra++;
+        const base = pos.top + i * 36.75 + extra * 30;
+        ctx.font = jp ? `500 21px ${FONT_JP}` : `400 21px ${FONT_MONO}`;
+        const vw = spacedWidth(ctx, val, sp);
+        ctx.font = `400 13px ${FONT_MONO}`;
+        const kw = spacedWidth(ctx, k, 13 * 0.06);
+        const vx = pos.right != null ? pos.right - vw : pos.left + keyCol + 14;
+        const kx = pos.right != null ? vx - 14 - kw : pos.left;
+        minLeft = Math.min(minLeft, j ? vx : kx);
+        if (measureOnly) return;
+        const glow = { color: "rgba(255,255,255,.25)", blur: 18 };
+        if (!j) {
+          ctx.save();
+          ctx.globalAlpha = 0.75;
+          fxText(ctx, S, d.fx, (dx) => fillSpaced(ctx, k, kx + dx, base, 13 * 0.06), glow);
+          ctx.restore();
+        }
+        ctx.font = jp ? `500 21px ${FONT_JP}` : `400 21px ${FONT_MONO}`;
+        fxText(ctx, S, d.fx, (dx) => fillSpaced(ctx, val, vx + dx, base, sp), glow);
+      });
     });
-    return { left: minLeft, bottom: pos.top + (rows.length - 1) * 36.75 + 6 };
+    return { left: minLeft, bottom: pos.top + (rows.length - 1) * 36.75 + extra * 30 + 6 };
   }
 
   // (cx, cy) から半径 r0〜r1 の輪の中の、いま描かれている色の平均（canvas の座標に直して読む）
@@ -576,18 +603,18 @@
     for (let rows = 1; rows <= n; rows++) {
       const cols = Math.ceil(n / rows);
       if ((rows - 1) * cols >= n) continue; // 空の行ができる
-      const D = Math.min(area.w / cols, area.h / rows) - SPEAKER_PAD;
+      const D = Math.min(area.w / cols - SPEAKER_PAD_X, area.h / rows - SPEAKER_PAD);
       if (!best || D > best.D) best = { rows, cols, D };
     }
     const D = Math.max(60, Math.min(GRID_MAX_D[n], best.D));
-    const cell = D + SPEAKER_PAD;
+    const cell = D + SPEAKER_PAD, cellX = Math.min(cell, area.w / best.cols);
     const top = area.y + (area.h - best.rows * cell) / 2;
     const out = [];
     for (let i = 0; i < n; i++) {
       const r = Math.floor(i / best.cols), c = i % best.cols;
       const inRow = Math.min(best.cols, n - r * best.cols);
       out.push({
-        cx: area.x + area.w / 2 + (c - (inRow - 1) / 2) * cell,
+        cx: area.x + area.w / 2 + (c - (inRow - 1) / 2) * cellX,
         // 目盛りの上端（-r-46）からラベルの下端（+r+62）までの真ん中をセルの中心にそろえる
         cy: top + (r + 0.5) * cell - 8,
         D,
@@ -632,9 +659,11 @@
       ctx.restore();
     }
 
+    // BY を折り返さなくてもタイトルが縮まないなら、折り返さない
     const side = { right: BW - INFO_RIGHT, top: INFO_TOP };
-    const infoLeft = infoBlock(ctx, S, d, side, true).left;
-    const sideTitleW = Math.min(BW - 116, infoLeft - 58 - 40);
+    const titleW = (pos) => Math.min(BW - 116, infoBlock(ctx, S, d, pos, true).left - 58 - 40);
+    if (fitTitle(ctx, d.title, titleW(side), 1).fs < 92) side.maxW = infoMaxW(BW);
+    const sideTitleW = titleW(side);
     let header = L.header;
     if (header === "auto") header = fitTitle(ctx, d.title, sideTitleW, 1).fs >= 64 ? "side" : "stack";
     let headerBottom;
@@ -643,10 +672,10 @@
       headerBottom = Math.max(titleBottom, infoBlock(ctx, S, d, side, false).bottom);
     } else {
       const titleBottom = titleBlock(ctx, S, d, BW - 116, L.wrap);
-      headerBottom = infoBlock(ctx, S, d, { left: 58, top: titleBottom + 52 }, false).bottom;
+      headerBottom = infoBlock(ctx, S, d, { left: 58, top: titleBottom + 52, maxW: BW - 116 - 80 }, false).bottom;
     }
 
-    const sps = d.speakers.slice(0, 4);
+    const sps = d.speakers.slice(0, 5);
     const n = Math.max(1, sps.length);
     const logoCy = logoBox(ctx, d, BW, BH).cy;
     let places;
@@ -655,7 +684,8 @@
       const bottom = d.showLogo || volAt(d, "corner") ? logoCy - LOGO.icon / 2 - 16 : BH - 44;
       places = gridPlacement(n, { x: 58, y: top, w: BW - 116, h: bottom - top });
     } else {
-      const D = ICON_D[n], step = D + SPEAKER_PAD;
+      // 横に収まらないときは間を詰め、それでも足りなければ小さくする（間は SPEAKER_PAD_X まで）
+      const step = Math.min(ICON_D[n] + SPEAKER_PAD, (BW - 116) / n), D = Math.min(ICON_D[n], step - SPEAKER_PAD_X);
       places = sps.map((_, i) => ({ cx: BW / 2 + (i - (n - 1) / 2) * step, cy: 384, D }));
     }
     const dl = { ...d, layoutSize: { W: BW, H: BH } };
